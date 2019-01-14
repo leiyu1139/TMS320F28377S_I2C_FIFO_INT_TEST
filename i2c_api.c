@@ -3,8 +3,8 @@
  * @Author: panqunfeng  at <panqf1989@foxmail.com>
  * @Version: rev1.0.0
  * @Created Date: Thursday, January 3rd 2019, 4:18:44 pm
- * @Last Modified: Monday, 14th January 2019 5:13:49 pm
- * @Modified By: the developer formerly known as panqunfeng at <panqf1989@foxmail.com>
+ * @Last Modified: Monday, 14th January 2019 8:34:23 pm
+ * @Modified By: the developer formerly known as panqunfeng at <panqunfeng@xmnewyea.com>
  * @Brief:
  * Copyright (c) 2019-2019 *** CO.，LTD
  * **************************************************************************************************
@@ -283,10 +283,9 @@ static Uint16 I2C_Write_Msg(struct _I2CMsg_TypeDef *msg)
     //
     // Send start as master transmitter
     //
-    // if(msg->SentNum < msg->NumOfBytes)
-    // {
-    //     I2C_TXFIFO_INT_ENABLE();
-    // }
+    if (len > 14) {
+        I2C_TXFIFO_INT_ENABLE();
+    }
     I2C_START_SEND_DATA();
     /* 设置发送状态 */
     I2cMsgOut1.MsgStatus = I2C_MSGSTAT_WRITE_BUSY;

@@ -1,9 +1,9 @@
 /*
- * @File: WPT_2837x_I2C.h
+ * @File: 2837x_I2C.c
  * @Author: panqunfeng  at <panqf1989@foxmail.com>
  * @Version: rev1.0.0
  * @Created Date: Thursday, January 3rd 2019, 4:16:48 pm
- * @Last Modified: Monday, 14th January 2019 10:49:25 am
+ * @Last Modified: Monday, 14th January 2019 2:35:00 pm
  * @Modified By: the developer formerly known as panqunfeng at <panqf1989@foxmail.com>
  * @Brief:
  * Copyright (c) 2019-2019 *** CO.，LTD
@@ -46,30 +46,119 @@
  * ----------	---	---------------------------------------------------------------------------------
  */
 
-/* Define to prevent recursive inclusion --------------------------------------------------------*/
-#ifndef WPT_2837X_I2C_H_
-#define WPT_2837X_I2C_H_
-/* Includes -------------------------------------------------------------------------------------*/
-#include "bsp.h"
-/* public define --------------------------------------------------------------------------------*/
-#define I2C_START_TRANSMIT_DATA 0x01
-#define I2C_START_TRANSMIT_ADDR 0x02
-#define I2C_START_RECEIVE 0x03
-/* public typedef -------------------------------------------------------------------------------*/
-/* public macro ---------------------------------------------------------------------------------*/
-/* public variables -----------------------------------------------------------------------------*/
-/** @defgroup
-  * @{
-  */
-/**
-  * @}
-  */
-/* public function prototypes -------------------------------------------------------------------*/
-/* public functions -----------------------------------------------------------------------------*/
 
-void WPT_InitConfig_I2C(void);
-interrupt void i2c_int1a_fifo_isr(void);
-interrupt void i2c_int1a_isr(void);
+
+
+
+
+
+
+/* Includes --------------------------------------------------------------------------------------*/
+#include "2837x_I2C.h"
+#include "i2c_api.h"
+/* Private define --------------------------------------------------------------------------------*/
+#define I2C_SLAVE_ADDR 0x50
+/* Private typedef -------------------------------------------------------------------------------*/
+/* Private macro ---------------------------------------------------------------------------------*/
+/* Private variables -----------------------------------------------------------------------------*/
+/* Private function prototypes -------------------------------------------------------------------*/
+/* Private functions -----------------------------------------------------------------------------*/
+static void InitI2CGpio(void);
+static void Init_I2C(void);
+/************************************************************************************
+ * Function Name : InitConfig_I2C
+ * Description   : This function initializes and config adc,include adca,adcb,adcc;
+ * Arguments     : None
+ * Return Value  : None
+ ************************************************************************************/
+void InitConfig_I2C(void)
+{
+    InitI2CGpio();
+    Init_I2C();
+}
+
+/************************************************************************************
+* Function Name : InitI2CGpio
+* Description   : This function initializes the gpio of the I2C;
+* Arguments     : None
+* Return Value  : None
+************************************************************************************/
+static void InitI2CGpio(void)
+{
+    GPIO_SetupPinMux(42, GPIO_MUX_CPU1, 6);
+    GPIO_SetupPinMux(43, GPIO_MUX_CPU1, 6);
+}
+
+/************************************************************************************
+* Function Name : Init_I2C
+* Description   : This function initializes the module of the I2C;
+* Arguments     : None
+* Return Value  : None
+************************************************************************************/
+static void Init_I2C(void)
+{
+    EALLOW;
+
+    I2caRegs.I2CSAR.all = 0x0050; // Slave address - EEPROM control code
+    // I2caRegs.I2CSAR.all = 0x0000;        // Slave address - EEPROM control code
+
+    //I2caRegs.I2CPSC.all = 6;         // Prescaler - need 7-12 Mhz on module clk
+    //I2caRegs.I2CCLKL = 10;           // NOTE: must be non zero
+    //I2caRegs.I2CCLKH = 5;            // NOTE: must be non zero
+
+//    I2caRegs.I2CPSC.all = 0x006; // Prescaler - need 7-12 Mhz on module clk
+//    I2caRegs.I2CCLKL = 0x000b; // NOTE: must be non zero
+//    I2caRegs.I2CCLKH = 0x000b; // NOTE: must be non zero
+    I2caRegs.I2CPSC.all = 16;         // Prescaler - need 7-12 Mhz on module clk
+    I2caRegs.I2CCLKL = 10;            // NOTE: must be non zero
+    I2caRegs.I2CCLKH = 5;             // NOTE: must be non zero
+    I2caRegs.I2CIER.all = 0x24;       // Enable SCD & ARDY __interrupts
+
+    I2caRegs.I2CMDR.all = 0x0020; // Take I2C out of reset
+        // Stop I2C when suspended
+//    I2caRegs.I2CFFTX.all = 0x6000;    // Enable FIFO mode and TXFIFO
+    I2caRegs.I2CFFTX.all = 0x6042; // Enable FIFO mode and TXFIFO
+    I2caRegs.I2CFFRX.all = 0x2042; // Enable RXFIFO, clear RXFFINT,
+    I2caRegs.I2CFFRX.bit.RXFFIENA = 1;
+    I2caRegs.I2CFFRX.bit.RXFFINTCLR = 1;
+    I2caRegs.I2CFFTX.bit.TXFFINTCLR = 1;
+    EDIS;
+    return;
+}
+
+interrupt void i2c_int1a_fifo_isr(void)
+{
+    //
+    // If receive FIFO interrupt flag is set, read data
+    //
+    if((I2caRegs.I2CFFTX.bit.TXFFINT == 1) && (I2caRegs.I2CFFTX.bit.TXFFIENA == 1))
+    {
+        I2C_TX_FIFO_Isr();
+        I2caRegs.I2CFFTX.bit.TXFFINTCLR = 1; //clears the TXFFINT flag.
+    }
+    //
+    // If transmit FIFO interrupt flag is set, put data in the buffer
+    //
+    if((I2caRegs.I2CFFRX.bit.RXFFINT == 1) && (I2caRegs.I2CFFRX.bit.RXFFIENA == 1))
+    {
+        I2C_RX_FIFO_Isr();
+        I2caRegs.I2CFFRX.bit.RXFFINTCLR = 1; //clears the RXFFINT flag.
+    }
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP8;
+}
+
+interrupt void i2c_int1a_isr(void) // I2C-A
+{
+    Uint16 IntSource;
+
+    // Read __interrupt source
+    IntSource = I2caRegs.I2CISRC.all;
+    I2C_IER_Isr(IntSource);
+
+    // Enable future I2C (PIE Group 8) __interrupts
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP8;
+}
+
 /*
  **************************************************************************************************
  * @func        I2CA_StopBitCheck
@@ -87,7 +176,10 @@ interrupt void i2c_int1a_isr(void);
  * @modified by    
  * @version        rev1.0.0
  */
-Uint16 I2CA_StopBitCheck(void);
+Uint16 I2CA_StopBitCheck(void)
+{
+    return I2caRegs.I2CMDR.bit.STP;
+}
 
 /*
  **************************************************************************************************
@@ -104,7 +196,10 @@ Uint16 I2CA_StopBitCheck(void);
  * @modified by    
  * @version        rev1.0.0
  */
-void I2CA_SetSAddr(Uint16 addr);
+void I2CA_SetSAddr(Uint16 addr)
+{
+    I2caRegs.I2CSAR.all = addr;
+}
 
 /*
  **************************************************************************************************
@@ -122,7 +217,10 @@ void I2CA_SetSAddr(Uint16 addr);
  * @modified by    
  * @version        rev1.0.0
  */
-Uint16 I2CA_BusBusyCheck(void);
+Uint16 I2CA_BusBusyCheck(void)
+{
+    return I2caRegs.I2CSTR.bit.BB;
+}
 
 /*
  **************************************************************************************************
@@ -139,7 +237,10 @@ Uint16 I2CA_BusBusyCheck(void);
  * @modified by    
  * @version        rev1.0.0
  */
-void I2CA_DataTransmit(Uint16 data);
+void I2CA_DataTransmit(Uint16 data)
+{
+    I2caRegs.I2CDXR.bit.DATA = (data & 0xFF);
+}
 
 /*
  **************************************************************************************************
@@ -156,7 +257,10 @@ void I2CA_DataTransmit(Uint16 data);
  * @modified by    
  * @version        rev1.0.0
  */
-void I2CA_DataCount(Uint16 num);
+void I2CA_DataCount(Uint16 num)
+{
+    I2caRegs.I2CCNT = num;
+}
 
 /*
  **************************************************************************************************
@@ -175,7 +279,27 @@ void I2CA_DataCount(Uint16 num);
  * @modified by    
  * @version        rev1.0.0
  */
-void I2CA_Start(Uint8 status);
+void I2CA_Start(Uint8 status)
+{
+    I2caRegs.I2CMDR.bit.MST = 1;
+    I2caRegs.I2CMDR.bit.STT = 1;
+    if (status == I2C_START_TRANSMIT_DATA) {
+//         I2caRegs.I2CMDR.all = 0x6E20;// TRX为1 STP FREE  MST  STT
+        I2caRegs.I2CMDR.bit.TRX = 1;
+        I2caRegs.I2CMDR.bit.STP = 1;
+        I2caRegs.I2CMDR.bit.FREE = 1;
+    } else if (status == I2C_START_TRANSMIT_ADDR) {
+        // Send data to setup EEPROM address
+        // I2caRegs.I2CMDR.all = 0x2620; // TRX为1  MST STT
+        I2caRegs.I2CMDR.bit.TRX = 1;
+    } else if (status == I2C_START_RECEIVE) {
+        // Send restart as master receiver
+//         I2caRegs.I2CMDR.all = 0x2C20; // STP  MST STT TRX为0
+        I2caRegs.I2CMDR.bit.STP = 1;
+        I2caRegs.I2CMDR.bit.TRX = 0;
+        I2caRegs.I2CMDR.bit.FREE = 1;
+    }
+}
 
 /*
  **************************************************************************************************
@@ -192,7 +316,10 @@ void I2CA_Start(Uint8 status);
  * @modified by    
  * @version        rev1.0.0
  */
-Uint16 I2CA_ReadData(void);
+Uint16 I2CA_ReadData(void)
+{
+    return I2caRegs.I2CDRR.all;
+}
 
 /*
  **************************************************************************************************
@@ -209,7 +336,10 @@ Uint16 I2CA_ReadData(void);
  * @modified by    
  * @version        rev1.0.0
  */
-void I2CA_NACKClear(void);
+void I2CA_NACKClear(void)
+{
+    I2caRegs.I2CSTR.all = I2C_CLR_NACK_BIT;
+}
 
 /*
  **************************************************************************************************
@@ -226,11 +356,14 @@ void I2CA_NACKClear(void);
  * @modified by    
  * @version        rev1.0.0
  */
-void I2CA_SetStopBit(void);
+void I2CA_SetStopBit(void)
+{
+    I2caRegs.I2CMDR.bit.STP = 1;
+}
 
 /*
  **************************************************************************************************
- * @func        I2CA_NACKCheck
+ * @func        I2CNACKCheck
  * @brief       check the nack bit 
  * @param 
  * @retval      0:NACK bit not received.
@@ -244,7 +377,10 @@ void I2CA_SetStopBit(void);
  * @modified by    
  * @version        rev1.0.0
  */
-Uint16 I2CA_NACKCheck(void);
+Uint16 I2CA_NACKCheck(void)
+{
+    return I2caRegs.I2CSTR.bit.NACK;
+}
 
 /*
  **************************************************************************************************
@@ -253,7 +389,7 @@ Uint16 I2CA_NACKCheck(void);
  * @param 
  * @retval  
  * @remarks
- * @note
+ * @note        注意操作顺序,一定要先开启ENA,在进行CLR RST.否则会导致fifo无法进入中断.
  * @see
  * @auther         pqf.pan at <panqf1989@foxmail.com>
  * @created date   Friday, January, 01 th 2019, 20:46:10
@@ -261,7 +397,12 @@ Uint16 I2CA_NACKCheck(void);
  * @modified by    
  * @version        rev1.0.0
  */
-void I2CA_TXFIFOIntEnable(void);
+void I2CA_TXFIFOIntEnable(void)
+{
+    I2caRegs.I2CFFTX.bit.TXFFIENA = 1;
+    I2caRegs.I2CFFTX.bit.TXFFINTCLR = 1;
+    I2caRegs.I2CFFTX.bit.TXFFRST = 1;
+}
 
 /*
  **************************************************************************************************
@@ -278,7 +419,11 @@ void I2CA_TXFIFOIntEnable(void);
  * @modified by    
  * @version        rev1.0.0
  */
-void I2CA_TXFIFOIntDisable(void);
+void I2CA_TXFIFOIntDisable(void)
+{
+    I2caRegs.I2CFFTX.bit.TXFFIENA = 0;
+}
 
-#endif /* WPT_2837X_I2C_H_ */
-    /*********************************** (C) COPYRIGHT 2018 ******************* END OF FILE ***********/
+
+
+/*********************************** (C) COPYRIGHT 2018 ******************* END OF FILE ***********/
