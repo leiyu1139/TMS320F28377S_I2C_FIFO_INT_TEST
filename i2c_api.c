@@ -310,7 +310,7 @@ static Uint16 I2C_Write_Msg(struct _I2CMsg_TypeDef *msg)
  */
 static Uint16 I2C_Read_Msg(struct _I2CMsg_TypeDef *msg)
 {
-    // Uint16 len;
+    Uint16 len;
     //
     // Wait until the STP bit is cleared from any previous master communication.
     // Clearing of this bit by the module is delayed until after the SCD bit is
@@ -342,9 +342,18 @@ static Uint16 I2C_Read_Msg(struct _I2CMsg_TypeDef *msg)
 
     else if(msg->MsgStatus == I2C_MSGSTAT_RESTART)
     {
+        // TODO 根据FIFO level 进行处理.避免最后几个字节无法触发fifo中断.
+        if((msg->NumOfBytes % 2) != 0)
+        {
+            len = msg->NumOfBytes + 1;
+        }
+        else
+        {
+            len = msg->NumOfBytes;
+        }
         msg->SentNum = 0;
         // Setup how many bytes to expect
-        I2C_SET_DATA_COUNT(msg->NumOfBytes);
+        I2C_SET_DATA_COUNT(len);
         // Send restart as master receiver
         I2C_START_RECEIVE_DATA();
         //    I2caRegs.I2CFFTX.bit.TXFFRST = 0x0D;
